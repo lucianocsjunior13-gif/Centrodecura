@@ -10,20 +10,18 @@ from tkinter import messagebox
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.drawing.image import Image as OpenpyxlImage
+import ctypes
+
 def exportar_excel_personalizado(texto_edicao=""):
     desktop = obter_pasta_desktop()
     pasta_destino = os.path.join(desktop, "relatorios")
     if not os.path.exists(pasta_destino):
         os.makedirs(pasta_destino)
 
-    tag_edicao = texto_edicao.strip() if texto_edicao.strip() else "edição#"
+    tag_edicao = texto_edicao.strip() if texto_edicao.strip() else "Edição#N"
     tag_edicao_limpa = "".join(c for c in tag_edicao if c.isalnum() or c in ('#', '_', '-'))
     
-    # Data com barras para o texto visual e hífens para o nome físico do arquivo
-    data_formatada_barras = datetime.now().strftime('%d/%m/%Y')
     data_arquivo = datetime.now().strftime('%d-%m-%Y')
-    
-    # Nome seguro para o sistema operacional Windows
     nome_arquivo = f"{tag_edicao_limpa}_{data_arquivo}.xlsx"
     caminho_final = os.path.join(pasta_destino, nome_arquivo)
 
@@ -45,65 +43,87 @@ def exportar_excel_personalizado(texto_edicao=""):
     ws.title = "Controle de Ponto"
     ws.views.sheetView[0].showGridLines = True
 
-    COR_VERDE_BANNER = "1F4E24"
-    COR_VERDE_FAIXA  = "2E933C"
-    COR_VERDE_ZEBRA  = "B8DABA"
+    # Cores baseadas no layout da imagem
+    COR_VERDE_BANNER = "1F5127"   # Verde escuro do banner superior
+    COR_VERDE_FAIXA  = "2D8A3E"   # Verde intermédio da linha 3
+    COR_VERDE_ZEBRA  = "BDDEB8"   # Verde claro das linhas alternadas
     COR_BRANCO       = "FFFFFF"
 
-    ws.row_dimensions[1].height = 48
-    ws.row_dimensions[2].height = 6
-    ws.row_dimensions[3].height = 28
+    # Alturas das linhas estruturais
+    ws.row_dimensions[1].height = 28
+    ws.row_dimensions[2].height = 28
+    ws.row_dimensions[3].height = 10
+    ws.row_dimensions[4].height = 30
 
-    # Título do Banner no formato solicitado: edição#n_dd/mm/aaaa
-    ws.merge_cells('C1:F1')
-    titulo_cell = ws['C1']
-    titulo_cell.value = f"Controle de Ponto — {tag_edicao_limpa}_{data_formatada_barras}"
-    titulo_cell.font = Font(name="Segoe UI", size=14, bold=True, color=COR_BRANCO)
-    titulo_cell.alignment = Alignment(horizontal="center", vertical="center")
+    # 1. Pinta todo o banner superior (linhas 1 e 2, colunas 1 a 6)
+    fill_banner = PatternFill(start_color=COR_VERDE_BANNER, end_color=COR_VERDE_BANNER, fill_type="solid")
+    for r in range(1, 3):
+        for col in range(1, 7):
+            ws.cell(row=r, column=col).fill = fill_banner
 
-    for col in range(1, 7):
-        ws.cell(row=1, column=col).fill = PatternFill(start_color=COR_VERDE_BANNER, end_color=COR_VERDE_BANNER, fill_type="solid")
-
-    logo_path = obter_caminho_recurso("logocura2.png")
-    if not os.path.exists(logo_path):
-        logo_path = obter_caminho_recurso("logocura.png")
-        
-    if os.path.exists(logo_path):
+    # 2. Caixa branca da logo na coluna 1 (unindo A1 e A2)
+    ws.merge_cells('A1:A2')
+    box_logo = ws['A1']
+    box_logo.fill = PatternFill(start_color=COR_BRANCO, end_color=COR_BRANCO, fill_type="solid")
+    
+    # Inserção da imagem da logo
+    caminho_logo = obter_caminho_recurso("logocura2.png")
+    if not os.path.exists(caminho_logo):
+        caminho_logo = obter_caminho_recurso("logocura.png")
+    if os.path.exists(caminho_logo):
         try:
-            img = OpenpyxlImage(logo_path)
-            img.width = 54
-            img.height = 54
+            img = OpenpyxlImage(caminho_logo)
+            img.width = 46
+            img.height = 46
             ws.add_image(img, 'A1')
         except Exception:
             pass
 
-    for col in range(1, 7):
-        ws.cell(row=2, column=col).fill = PatternFill(start_color=COR_VERDE_FAIXA, end_color=COR_VERDE_FAIXA, fill_type="solid")
+    # 3. Título central (unindo B1:E2)
+    ws.merge_cells('B1:E2')
+    cell_titulo = ws['B1']
+    cell_titulo.value = "Controle de ponto do centro de cura"
+    cell_titulo.font = Font(name="Segoe UI", size=15, bold=True, color=COR_BRANCO)
+    cell_titulo.alignment = Alignment(horizontal="center", vertical="center")
 
+    # 4. Texto da Edição à direita (unindo F1:F2)
+    ws.merge_cells('F1:F2')
+    cell_edicao = ws['F1']
+    cell_edicao.value = tag_edicao
+    cell_edicao.font = Font(name="Segoe UI", size=14, bold=True, color=COR_BRANCO)
+    cell_edicao.alignment = Alignment(horizontal="center", vertical="center")
+
+    # 5. Faixa verde intermédia (Linha 3)
+    fill_faixa = PatternFill(start_color=COR_VERDE_FAIXA, end_color=COR_VERDE_FAIXA, fill_type="solid")
+    for col in range(1, 7):
+        ws.cell(row=3, column=col).fill = fill_faixa
+
+    # 6. Cabeçalhos da tabela (Linha 4)
     cabecalhos = [
         "Ministro",
-        "Código do Crachá",
+        "Codigo do cracha",
         "Hora",
         "Data",
-        "Quantidade de Ministros Hoje",
-        "Total de Ministros"
+        "Quantidade de minsitro de hoje",
+        "Quantidade de minsitros"
     ]
 
     borda_fina = Border(
-        left=Side(style='thin', color='D0D0D0'),
-        right=Side(style='thin', color='D0D0D0'),
-        top=Side(style='thin', color='D0D0D0'),
-        bottom=Side(style='thin', color='D0D0D0')
+        left=Side(style='thin', color='D9D9D9'),
+        right=Side(style='thin', color='D9D9D9'),
+        top=Side(style='thin', color='D9D9D9'),
+        bottom=Side(style='thin', color='D9D9D9')
     )
 
     for idx, texto in enumerate(cabecalhos, 1):
-        c = ws.cell(row=3, column=idx)
+        c = ws.cell(row=4, column=idx)
         c.value = texto
         c.font = Font(name="Segoe UI", size=11, bold=True, color="000000")
         c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         c.border = borda_fina
 
-    linha_atual = 4
+    # 7. Preenchimento dos dados com zebra e totais
+    linha_atual = 5
     for reg in registros:
         nome, codigo, data_hora = reg
         try:
@@ -115,7 +135,8 @@ def exportar_excel_personalizado(texto_edicao=""):
             data_str = partes[0] if len(partes) > 0 else data_hora
             hora_str = partes[1] if len(partes) > 1 else ""
 
-        cor_fundo = COR_VERDE_ZEBRA if (linha_atual % 2 == 0) else COR_BRANCO
+        # Alternância de cores: linhas ímpares recebem verde claro
+        cor_fundo = COR_VERDE_ZEBRA if (linha_atual % 2 != 0) else COR_BRANCO
         fill_zebrada = PatternFill(start_color=cor_fundo, end_color=cor_fundo, fill_type="solid")
 
         ws.cell(row=linha_atual, column=1, value=nome)
@@ -123,7 +144,8 @@ def exportar_excel_personalizado(texto_edicao=""):
         ws.cell(row=linha_atual, column=3, value=hora_str)
         ws.cell(row=linha_atual, column=4, value=data_str)
         
-        if linha_atual == 4:
+        # Totais preenchidos apenas na primeira linha de dados (linha 5)
+        if linha_atual == 5:
             ws.cell(row=linha_atual, column=5, value=total_hoje)
             ws.cell(row=linha_atual, column=6, value=total_cadastrados)
 
@@ -137,7 +159,8 @@ def exportar_excel_personalizado(texto_edicao=""):
         ws.row_dimensions[linha_atual].height = 22
         linha_atual += 1
 
-    larguras = {1: 24, 2: 18, 3: 16, 4: 16, 5: 30, 6: 24}
+    # Larguras das colunas proporcionais ao exemplo da imagem
+    larguras = {1: 26, 2: 20, 3: 16, 4: 16, 5: 32, 6: 28}
     for col_idx, width in larguras.items():
         ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = width
 
@@ -261,16 +284,18 @@ def obter_estatisticas():
     conn.close()
     return total_ministros, total_pontos_hoje
 
-def obter_ultimos_registros(limite=15):
+def obter_ultimos_registros(limite=50):
+    hoje = datetime.now().strftime('%d/%m/%Y')
     conn = sqlite3.connect('controle_ponto.db')
     cursor = conn.cursor()
     cursor.execute('''
         SELECT f.nome, f.codigo_barra, r.data_hora
         FROM registros r
         JOIN funcionarios f ON r.funcionario_id = f.id
+        WHERE r.data_hora LIKE ?
         ORDER BY r.id DESC
         LIMIT ?
-    ''', (limite,))
+    ''', (f"{hoje}%", limite))
     dados = cursor.fetchall()
     conn.close()
     return dados
@@ -426,6 +451,45 @@ def gerar_imagem_barcode(codigo_6_digitos, nome):
 # ==========================================
 # INTERFACE GRÁFICA
 # ==========================================
+
+def aplicar_tema_barra_titulo(janela, cor_hex="#F5F7F4"):
+    """
+    Define a cor de fundo e do texto da barra de título nativa no Windows 10/11.
+    """
+    try:
+        janela.update_idletasks()
+        # Obtém o HWND da janela nativa do Windows
+        hwnd = ctypes.windll.user32.GetParent(janela.winfo_id())
+        if not hwnd:
+            hwnd = janela.winfo_id()
+
+        # Converte RGB hex (#RRGGBB) para formato BGR aceito pelo Windows DWM
+        r = int(cor_hex[1:3], 16)
+        g = int(cor_hex[3:5], 16)
+        b = int(cor_hex[5:7], 16)
+        cor_bgr = (b << 16) | (g << 8) | r
+
+        # 35 = DWMWA_CAPTION_COLOR (cor de fundo da barra)
+        DWMWA_CAPTION_COLOR = 35
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CAPTION_COLOR,
+            ctypes.byref(ctypes.c_int(cor_bgr)),
+            ctypes.sizeof(ctypes.c_int)
+        )
+
+        # 36 = DWMWA_TEXT_COLOR (cor do texto do título: #17221D)
+        DWMWA_TEXT_COLOR = 36
+        cor_texto_bgr = (0x1D << 16) | (0x22 << 8) | 0x17
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_TEXT_COLOR,
+            ctypes.byref(ctypes.c_int(cor_texto_bgr)),
+            ctypes.sizeof(ctypes.c_int)
+        )
+    except Exception:
+        pass
+
 if __name__ == "__main__":
     inicializar_banco()
     
@@ -433,12 +497,24 @@ if __name__ == "__main__":
 
     app = ctk.CTk()
     app.title("Centro de Cura — Sistema de Controle de Ponto")
-    app.state("zoomed")
     
     # 1. Troca o ícone padrão pelo ícone da sua aplicação
-    caminho_ico = obter_caminho_recurso("logocura.ico")
+    caminho_ico = obter_caminho_recurso("logo.ico")
+    if not os.path.exists(caminho_ico):
+        caminho_ico = obter_caminho_recurso("logocura.ico")
+
     if os.path.exists(caminho_ico):
-        app.iconbitmap(caminho_ico)
+        try:
+            app.iconbitmap(caminho_ico)
+            app.after(200, lambda: app.iconbitmap(caminho_ico))
+        except Exception:
+            pass
+
+    # 2. Pinta a barra nativa do Windows
+    aplicar_tema_barra_titulo(app, cor_hex="#F5F7F4")
+
+    # 3. Força a abertura em tela cheia maximizada após renderizar
+    app.after(100, lambda: app.state("zoomed"))
 
     # 2. Pinta a barra nativa do Windows
     aplicar_tema_barra_titulo(app, cor_hex="#F5F7F4")
@@ -479,26 +555,6 @@ if __name__ == "__main__":
             lbl_logo.pack(side="left", padx=(0, 14))
         except Exception:
             pass
-
-    title_box = ctk.CTkFrame(header_left, fg_color="transparent")
-    title_box.pack(side="left")
-
-    ctk.CTkLabel(title_box, text="CENTRO DE CURA", font=("Segoe UI", 18, "bold"), text_color=COR_TEXTO, anchor="w").pack(fill="x")
-    ctk.CTkLabel(title_box, text="Sistema de Controle de Ponto", font=("Segoe UI", 12), text_color=COR_CINZA, anchor="w").pack(fill="x")
-
-    def acao_exportar():
-        edicao_texto = entry_edicao.get().strip()
-        caminho_salvo = exportar_excel_personalizado(edicao_texto)
-        messagebox.showinfo("Exportação Concluída", f"Planilha salva com sucesso em:\n\n{caminho_salvo}")
-
-    btn_exportar_topo = ctk.CTkButton(
-        header, text="📊  Exportar Excel", command=acao_exportar,
-        height=38, width=150, corner_radius=10,
-        fg_color=COR_BRANCO, hover_color=COR_FUNDO,
-        border_width=1, border_color=COR_BORDA_INP,
-        text_color=COR_VERDE_PRI, font=("Segoe UI", 13, "bold")
-    )
-    btn_exportar_topo.pack(side="right", padx=28)
 
     title_box = ctk.CTkFrame(header_left, fg_color="transparent")
     title_box.pack(side="left")
@@ -633,31 +689,32 @@ if __name__ == "__main__":
     btn_cadastrar = ctk.CTkButton(form_box, text="Gerar crachá", command=salvar_cadastro, width=360, height=42, corner_radius=10, fg_color=COR_VERDE_PRI, hover_color=COR_VERDE_SEC, text_color=COR_BRANCO, font=("Segoe UI", 14, "bold"))
     btn_cadastrar.pack(pady=(5, 0))
 
-    # --- TELA 3: PONTO COM EDIÇÃO# ---
+# --- TELA 3: PONTO ---
     view_ponto = ctk.CTkFrame(card_central, fg_color="transparent")
-    ctk.CTkLabel(view_ponto, text="REGISTRAR PONTO", font=("Segoe UI", 20, "bold"), text_color=COR_TEXTO).pack(pady=(22, 4))
-    ctk.CTkLabel(view_ponto, text="Passe o seu crachá", font=("Segoe UI", 13), text_color=COR_CINZA).pack(pady=(0, 12))
+    ctk.CTkLabel(view_ponto, text="REGISTRAR PONTO", font=("Segoe UI", 20, "bold"), text_color=COR_TEXTO).pack(pady=(35, 4))
+    ctk.CTkLabel(view_ponto, text="Passe o seu crachá no leitor", font=("Segoe UI", 13), text_color=COR_CINZA).pack(pady=(0, 20))
 
-    icone_box = ctk.CTkFrame(view_ponto, width=88, height=54, corner_radius=12, fg_color=COR_FUNDO, border_width=1, border_color=COR_BORDA)
-    icone_box.pack(pady=(0, 8))
-    icone_box.pack_propagate(False)
-    ctk.CTkLabel(icone_box, text="◉", font=("Segoe UI", 22), text_color=COR_VERDE_PRI).place(relx=0.5, rely=0.5, anchor="center")
+    # Campo 1: Leitura de Crachá
+    ctk.CTkLabel(view_ponto, text="Código do Crachá", font=("Segoe UI", 12, "bold"), text_color=COR_TEXTO, anchor="w").pack(fill="x", padx=100, pady=(0, 4))
+    entry_leitura = ctk.CTkEntry(
+        view_ponto, width=340, height=42, corner_radius=10, 
+        fg_color=COR_FUNDO, border_width=1, border_color=COR_VERDE_PRI, 
+        justify="center", font=("Segoe UI", 15), 
+        placeholder_text="Aguardando leitura...", text_color=COR_TEXTO
+    )
+    entry_leitura.pack(pady=(0, 16))
 
-    ctk.CTkLabel(view_ponto, text="Aproxime o crachá do leitor USB", font=("Segoe UI", 12), text_color=COR_CINZA).pack(pady=(0, 8))
-
-    entry_leitura = ctk.CTkEntry(view_ponto, width=340, height=42, corner_radius=10, fg_color=COR_FUNDO, border_width=1, border_color=COR_VERDE_PRI, justify="center", font=("Segoe UI", 15), placeholder_text="Aguardando leitura...", text_color=COR_TEXTO)
-    entry_leitura.pack(pady=(0, 8))
-
-    # CAMPO DE EDIÇÃO (Prefixado com edição#)
-    box_edicao = ctk.CTkFrame(view_ponto, fg_color="transparent")
-    box_edicao.pack(pady=(0, 8))
-    
-    ctk.CTkLabel(box_edicao, text="Identificação da Edição:", font=("Segoe UI", 11, "bold"), text_color=COR_CINZA).pack(side="left", padx=(0, 8))
-    entry_edicao = ctk.CTkEntry(box_edicao, width=170, height=32, corner_radius=8, font=("Segoe UI", 12, "bold"), text_color=COR_VERDE_PRI, fg_color=COR_FUNDO, border_color=COR_BORDA_INP)
-    entry_edicao.pack(side="left")
+    # Campo 2: Identificação da Edição (Idêntico ao campo de cima em formato e alinhamento)
+    ctk.CTkLabel(view_ponto, text="Identificação da Edição", font=("Segoe UI", 12, "bold"), text_color=COR_TEXTO, anchor="w").pack(fill="x", padx=100, pady=(0, 4))
+    entry_edicao = ctk.CTkEntry(
+        view_ponto, width=340, height=42, corner_radius=10, 
+        fg_color=COR_FUNDO, border_width=1, border_color=COR_BORDA_INP, 
+        justify="center", font=("Segoe UI", 14, "bold"), 
+        text_color=COR_VERDE_PRI
+    )
+    entry_edicao.pack(pady=(0, 14))
     entry_edicao.insert(0, "edição#")
 
-    # Garante que o prefixo "edição#" não seja apagado acidentalmente
     def validar_prefixo_edicao(event=None):
         val = entry_edicao.get()
         if not val.startswith("edição#"):
@@ -668,7 +725,7 @@ if __name__ == "__main__":
     entry_edicao.bind('<KeyRelease>', validar_prefixo_edicao)
 
     alerta_ponto = ctk.CTkFrame(view_ponto, width=340, height=38, corner_radius=10, fg_color="transparent")
-    alerta_ponto.pack(pady=(0, 6))
+    alerta_ponto.pack(pady=(0, 10))
     alerta_ponto.pack_propagate(False)
     lbl_alerta_ponto = ctk.CTkLabel(alerta_ponto, text="", font=("Segoe UI", 12, "bold"))
     lbl_alerta_ponto.place(relx=0.5, rely=0.5, anchor="center")
@@ -687,12 +744,14 @@ if __name__ == "__main__":
         return "break"
 
     entry_leitura.bind('<Return>', on_enter_leitura)
-    ctk.CTkLabel(view_ponto, text="●  Leitor pronto para leitura", font=("Segoe UI", 12), text_color=COR_VERDE_SEC).pack(side="bottom", pady=16)
+    ctk.CTkLabel(view_ponto, text="●  Leitor pronto para leitura", font=("Segoe UI", 12), text_color=COR_VERDE_SEC).pack(side="bottom", pady=20)
 
-    # --- TELA 4: RELATÓRIOS ---
+
+    
+# --- TELA 4: RELATÓRIOS ---
     view_relatorios = ctk.CTkFrame(card_central, fg_color="transparent")
-    ctk.CTkLabel(view_relatorios, text="HISTÓRICO DE LEITURAS", font=("Segoe UI", 20, "bold"), text_color=COR_TEXTO).pack(pady=(28, 4))
-    ctk.CTkLabel(view_relatorios, text="Últimos registros gravados localmente", font=("Segoe UI", 13), text_color=COR_CINZA).pack(pady=(0, 14))
+    ctk.CTkLabel(view_relatorios, text="HISTÓRICO DE HOJE", font=("Segoe UI", 20, "bold"), text_color=COR_TEXTO).pack(pady=(28, 4))
+    ctk.CTkLabel(view_relatorios, text="Registros de presença da data atual", font=("Segoe UI", 13), text_color=COR_CINZA).pack(pady=(0, 14))
 
     lista_box = ctk.CTkScrollableFrame(view_relatorios, width=420, height=260, corner_radius=10, fg_color=COR_FUNDO, border_width=1, border_color=COR_BORDA)
     lista_box.pack(pady=(0, 16))
@@ -700,9 +759,9 @@ if __name__ == "__main__":
     def atualizar_relatorio_visual():
         for w in lista_box.winfo_children():
             w.destroy()
-        dados = obter_ultimos_registros(15)
+        dados = obter_ultimos_registros(50)
         if not dados:
-            ctk.CTkLabel(lista_box, text="Nenhum registro encontrado.", font=("Segoe UI", 12), text_color=COR_CINZA).pack(pady=35)
+            ctk.CTkLabel(lista_box, text="Nenhum ponto registrado hoje.", font=("Segoe UI", 12), text_color=COR_CINZA).pack(pady=35)
             return
         for nome, cod, data_hora in dados:
             item = ctk.CTkFrame(lista_box, fg_color=COR_BRANCO, corner_radius=8, height=38)
@@ -710,7 +769,19 @@ if __name__ == "__main__":
             ctk.CTkLabel(item, text=f"{nome} ({cod})", font=("Segoe UI", 12, "bold"), text_color=COR_TEXTO).pack(side="left", padx=10, pady=6)
             ctk.CTkLabel(item, text=data_hora, font=("Segoe UI", 11), text_color=COR_CINZA).pack(side="right", padx=10, pady=6)
 
-    ctk.CTkButton(view_relatorios, text="📊 Baixar Planilha na Área de Trabalho", command=acao_exportar, width=420, height=40, corner_radius=10, fg_color=COR_VERDE_PRI, hover_color=COR_VERDE_SEC, text_color=COR_BRANCO, font=("Segoe UI", 13, "bold")).pack()
+    # Apenas uma instância do botão de exportar
+    ctk.CTkButton(
+        view_relatorios, 
+        text="📊 Baixar Planilha na Área de Trabalho", 
+        command=acao_exportar, 
+        width=420, 
+        height=40, 
+        corner_radius=10, 
+        fg_color=COR_VERDE_PRI, 
+        hover_color=COR_VERDE_SEC, 
+        text_color=COR_BRANCO, 
+        font=("Segoe UI", 13, "bold")
+    ).pack(pady=(0, 10))
 
     # --- TELA 5: CONFIGURAÇÕES ---
     view_config = ctk.CTkFrame(card_central, fg_color="transparent")
