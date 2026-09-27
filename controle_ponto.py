@@ -11,6 +11,67 @@ import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from openpyxl.drawing.image import Image as OpenpyxlImage
 import ctypes
+import urllib.request
+import json
+import subprocess
+import threading
+from packaging import version  # ou comparação simples de string
+
+VERSAO_ATUAL = "1.0.0"
+REPO_GITHUB = "lucanocsjunior13-gif/Centrodecura"
+
+def verificar_atualizacao(janela_app=None):
+    def _checar():
+        try:
+            url_api = f"https://api.github.com/repos/{REPO_GITHUB}/releases/latest"
+            req = urllib.request.Request(url_api, headers={'User-Agent': 'Mozilla/5.0'})
+            
+            with urllib.request.urlopen(req, timeout=5) as resposta:
+                dados = json.loads(resposta.read().decode())
+                
+            tag_remota = dados.get("tag_name", "").replace("v", "").strip()
+            
+            # Se a versão remota for mais nova que a atual
+            if tag_remota and tag_remota != VERSAO_ATUAL:
+                # Procura o arquivo CentroDeCura.exe nos anexos da Release
+                download_url = None
+                for asset in dados.get("assets", []):
+                    if asset.get("name") == "CentroDeCura.exe":
+                        download_url = asset.get("browser_download_url")
+                        break
+                
+                if download_url:
+                    print(f"Atualização encontrada: {tag_remota}. Baixando...")
+                    
+                    # Caminho do executável atual
+                    caminho_atual = sys.executable
+                    caminho_novo = caminho_atual + ".novo"
+                    
+                    # Baixa a nova versão
+                    urllib.request.urlretrieve(download_url, caminho_novo)
+                    
+                    # Script batch temporário para trocar o executável e reabrir
+                    cmd_bat = f"""@echo off
+timeout /t 2 /nobreak > nul
+move /y "{caminho_novo}" "{caminho_atual}"
+start "" "{caminho_atual}"
+del "%~f0"
+"""
+                    caminho_bat = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "atualizar.bat")
+                    with open(caminho_bat, "w") as f:
+                        f.write(cmd_bat)
+                    
+                    # Executa o batch e encerra o app atual para ser substituído
+                    subprocess.Popen(caminho_bat, shell=True)
+                    if janela_app:
+                        janela_app.destroy()
+                    sys.exit(0)
+        except Exception as e:
+            # Se estiver sem internet ou der timeout, segue a vida normalmente
+            print("Verificação de update ignorada:", e)
+
+    # Roda em thread separada para não travar a abertura do app
+    threading.Thread(target=_checar, daemon=True).start()
 
 def exportar_excel_personalizado(texto_edicao=""):
     desktop = obter_pasta_desktop()
@@ -491,6 +552,10 @@ def aplicar_tema_barra_titulo(janela, cor_hex="#F5F7F4"):
         pass
 
 if __name__ == "__main__":
+
+    # Verifica atualização no GitHub sem travar a interface
+    verificar_atualizacao(app)
+    
     inicializar_banco()
     
     ctk.set_appearance_mode("light")
