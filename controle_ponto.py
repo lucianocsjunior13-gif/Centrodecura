@@ -4,7 +4,7 @@ import os
 import sys
 import barcode
 from barcode.writer import ImageWriter
-from PIL import Image
+from PIL import Image, ImageFont
 import customtkinter as ctk
 from tkinter import messagebox
 import openpyxl
@@ -15,222 +15,8 @@ import urllib.request
 import json
 import subprocess
 import threading
-from packaging import version  # ou comparação simples de string
 
-VERSAO_ATUAL = "1.0.0"
-REPO_GITHUB = "lucanocsjunior13-gif/Centrodecura"
 
-def verificar_atualizacao(janela_app=None):
-    def _checar():
-        try:
-            url_api = f"https://api.github.com/repos/{REPO_GITHUB}/releases/latest"
-            req = urllib.request.Request(url_api, headers={'User-Agent': 'Mozilla/5.0'})
-            
-            with urllib.request.urlopen(req, timeout=5) as resposta:
-                dados = json.loads(resposta.read().decode())
-                
-            tag_remota = dados.get("tag_name", "").replace("v", "").strip()
-            
-            # Se a versão remota for mais nova que a atual
-            if tag_remota and tag_remota != VERSAO_ATUAL:
-                # Procura o arquivo CentroDeCura.exe nos anexos da Release
-                download_url = None
-                for asset in dados.get("assets", []):
-                    if asset.get("name") == "CentroDeCura.exe":
-                        download_url = asset.get("browser_download_url")
-                        break
-                
-                if download_url:
-                    print(f"Atualização encontrada: {tag_remota}. Baixando...")
-                    
-                    # Caminho do executável atual
-                    caminho_atual = sys.executable
-                    caminho_novo = caminho_atual + ".novo"
-                    
-                    # Baixa a nova versão
-                    urllib.request.urlretrieve(download_url, caminho_novo)
-                    
-                    # Script batch temporário para trocar o executável e reabrir
-                    cmd_bat = f"""@echo off
-timeout /t 2 /nobreak > nul
-move /y "{caminho_novo}" "{caminho_atual}"
-start "" "{caminho_atual}"
-del "%~f0"
-"""
-                    caminho_bat = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "atualizar.bat")
-                    with open(caminho_bat, "w") as f:
-                        f.write(cmd_bat)
-                    
-                    # Executa o batch e encerra o app atual para ser substituído
-                    subprocess.Popen(caminho_bat, shell=True)
-                    if janela_app:
-                        janela_app.destroy()
-                    sys.exit(0)
-        except Exception as e:
-            # Se estiver sem internet ou der timeout, segue a vida normalmente
-            print("Verificação de update ignorada:", e)
-
-    # Roda em thread separada para não travar a abertura do app
-    threading.Thread(target=_checar, daemon=True).start()
-
-def exportar_excel_personalizado(texto_edicao=""):
-    desktop = obter_pasta_desktop()
-    pasta_destino = os.path.join(desktop, "relatorios")
-    if not os.path.exists(pasta_destino):
-        os.makedirs(pasta_destino)
-
-    tag_edicao = texto_edicao.strip() if texto_edicao.strip() else "Edição#N"
-    tag_edicao_limpa = "".join(c for c in tag_edicao if c.isalnum() or c in ('#', '_', '-'))
-    
-    data_arquivo = datetime.now().strftime('%d-%m-%Y')
-    nome_arquivo = f"{tag_edicao_limpa}_{data_arquivo}.xlsx"
-    caminho_final = os.path.join(pasta_destino, nome_arquivo)
-
-    conn = sqlite3.connect('controle_ponto.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT f.nome, f.codigo_barra, r.data_hora
-        FROM registros r
-        JOIN funcionarios f ON r.funcionario_id = f.id
-        ORDER BY r.id ASC
-    ''')
-    registros = cursor.fetchall()
-    conn.close()
-
-    total_cadastrados, total_hoje = obter_estatisticas()
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Controle de Ponto"
-    ws.views.sheetView[0].showGridLines = True
-
-    # Cores baseadas no layout da imagem
-    COR_VERDE_BANNER = "1F5127"   # Verde escuro do banner superior
-    COR_VERDE_FAIXA  = "2D8A3E"   # Verde intermédio da linha 3
-    COR_VERDE_ZEBRA  = "BDDEB8"   # Verde claro das linhas alternadas
-    COR_BRANCO       = "FFFFFF"
-
-    # Alturas das linhas estruturais
-    ws.row_dimensions[1].height = 28
-    ws.row_dimensions[2].height = 28
-    ws.row_dimensions[3].height = 10
-    ws.row_dimensions[4].height = 30
-
-    # 1. Pinta todo o banner superior (linhas 1 e 2, colunas 1 a 6)
-    fill_banner = PatternFill(start_color=COR_VERDE_BANNER, end_color=COR_VERDE_BANNER, fill_type="solid")
-    for r in range(1, 3):
-        for col in range(1, 7):
-            ws.cell(row=r, column=col).fill = fill_banner
-
-    # 2. Caixa branca da logo na coluna 1 (unindo A1 e A2)
-    ws.merge_cells('A1:A2')
-    box_logo = ws['A1']
-    box_logo.fill = PatternFill(start_color=COR_BRANCO, end_color=COR_BRANCO, fill_type="solid")
-    
-    # Inserção da imagem da logo
-    caminho_logo = obter_caminho_recurso("logocura2.png")
-    if not os.path.exists(caminho_logo):
-        caminho_logo = obter_caminho_recurso("logocura.png")
-    if os.path.exists(caminho_logo):
-        try:
-            img = OpenpyxlImage(caminho_logo)
-            img.width = 46
-            img.height = 46
-            ws.add_image(img, 'A1')
-        except Exception:
-            pass
-
-    # 3. Título central (unindo B1:E2)
-    ws.merge_cells('B1:E2')
-    cell_titulo = ws['B1']
-    cell_titulo.value = "Controle de ponto do centro de cura"
-    cell_titulo.font = Font(name="Segoe UI", size=15, bold=True, color=COR_BRANCO)
-    cell_titulo.alignment = Alignment(horizontal="center", vertical="center")
-
-    # 4. Texto da Edição à direita (unindo F1:F2)
-    ws.merge_cells('F1:F2')
-    cell_edicao = ws['F1']
-    cell_edicao.value = tag_edicao
-    cell_edicao.font = Font(name="Segoe UI", size=14, bold=True, color=COR_BRANCO)
-    cell_edicao.alignment = Alignment(horizontal="center", vertical="center")
-
-    # 5. Faixa verde intermédia (Linha 3)
-    fill_faixa = PatternFill(start_color=COR_VERDE_FAIXA, end_color=COR_VERDE_FAIXA, fill_type="solid")
-    for col in range(1, 7):
-        ws.cell(row=3, column=col).fill = fill_faixa
-
-    # 6. Cabeçalhos da tabela (Linha 4)
-    cabecalhos = [
-        "Ministro",
-        "Codigo do cracha",
-        "Hora",
-        "Data",
-        "Quantidade de minsitro de hoje",
-        "Quantidade de minsitros"
-    ]
-
-    borda_fina = Border(
-        left=Side(style='thin', color='D9D9D9'),
-        right=Side(style='thin', color='D9D9D9'),
-        top=Side(style='thin', color='D9D9D9'),
-        bottom=Side(style='thin', color='D9D9D9')
-    )
-
-    for idx, texto in enumerate(cabecalhos, 1):
-        c = ws.cell(row=4, column=idx)
-        c.value = texto
-        c.font = Font(name="Segoe UI", size=11, bold=True, color="000000")
-        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        c.border = borda_fina
-
-    # 7. Preenchimento dos dados com zebra e totais
-    linha_atual = 5
-    for reg in registros:
-        nome, codigo, data_hora = reg
-        try:
-            dt_obj = datetime.strptime(data_hora, '%d/%m/%Y às %H:%M:%S')
-            hora_str = dt_obj.strftime('%H:%M:%S')
-            data_str = dt_obj.strftime('%d/%m/%Y')
-        except Exception:
-            partes = data_hora.split(" às ")
-            data_str = partes[0] if len(partes) > 0 else data_hora
-            hora_str = partes[1] if len(partes) > 1 else ""
-
-        # Alternância de cores: linhas ímpares recebem verde claro
-        cor_fundo = COR_VERDE_ZEBRA if (linha_atual % 2 != 0) else COR_BRANCO
-        fill_zebrada = PatternFill(start_color=cor_fundo, end_color=cor_fundo, fill_type="solid")
-
-        ws.cell(row=linha_atual, column=1, value=nome)
-        ws.cell(row=linha_atual, column=2, value=str(codigo))
-        ws.cell(row=linha_atual, column=3, value=hora_str)
-        ws.cell(row=linha_atual, column=4, value=data_str)
-        
-        # Totais preenchidos apenas na primeira linha de dados (linha 5)
-        if linha_atual == 5:
-            ws.cell(row=linha_atual, column=5, value=total_hoje)
-            ws.cell(row=linha_atual, column=6, value=total_cadastrados)
-
-        for col in range(1, 7):
-            cell = ws.cell(row=linha_atual, column=col)
-            cell.fill = fill_zebrada
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.border = borda_fina
-            cell.font = Font(name="Segoe UI", size=10)
-
-        ws.row_dimensions[linha_atual].height = 22
-        linha_atual += 1
-
-    # Larguras das colunas proporcionais ao exemplo da imagem
-    larguras = {1: 26, 2: 20, 3: 16, 4: 16, 5: 32, 6: 28}
-    for col_idx, width in larguras.items():
-        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = width
-
-    wb.save(caminho_final)
-    return caminho_final
-
-# ==========================================
-# SUPORTE A CAMINHOS (.PY E .EXE)
-# ==========================================
 def obter_caminho_recurso(nome_arquivo):
     if getattr(sys, 'frozen', False):
         base_path = sys._MEIPASS
@@ -243,6 +29,61 @@ def obter_caminho_recurso(nome_arquivo):
     if os.path.exists(nome_arquivo):
         return nome_arquivo
     return nome_arquivo
+
+VERSAO_ATUAL = "1.0.1"
+REPO_GITHUB = "lucanocsjunior13-gif/Centrodecura"
+
+try:
+    fonte_titulo = ImageFont.truetype("arial.ttf", 28)
+    fonte_sub = ImageFont.truetype("arial.ttf", 18)
+except Exception:
+    fonte_titulo = ImageFont.load_default()
+    fonte_sub = ImageFont.load_default()
+
+def verificar_atualizacao(janela_app=None):
+    def _checar():
+        try:
+            url_api = f"https://api.github.com/repos/{REPO_GITHUB}/releases/latest"
+            req = urllib.request.Request(url_api, headers={'User-Agent': 'Mozilla/5.0'})
+            
+            with urllib.request.urlopen(req, timeout=5) as resposta:
+                dados = json.loads(resposta.read().decode())
+                
+            tag_remota = dados.get("tag_name", "").replace("v", "").strip()
+            
+            if tag_remota and tag_remota != VERSAO_ATUAL:
+                download_url = None
+                for asset in dados.get("assets", []):
+                    if asset.get("name") == "CentroDeCura.exe":
+                        download_url = asset.get("browser_download_url")
+                        break
+                
+                if download_url:
+                    print(f"Atualização encontrada: {tag_remota}. Baixando...")
+                    
+                    caminho_atual = sys.executable
+                    caminho_novo = caminho_atual + ".novo"
+                    
+                    urllib.request.urlretrieve(download_url, caminho_novo)
+                    
+                    cmd_bat = f"""@echo off
+timeout /t 2 /nobreak > nul
+move /y "{caminho_novo}" "{caminho_atual}"
+start "" "{caminho_atual}"
+del "%~f0"
+"""
+                    caminho_bat = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "atualizar.bat")
+                    with open(caminho_bat, "w") as f:
+                        f.write(cmd_bat)
+                    
+                    subprocess.Popen(caminho_bat, shell=True)
+                    if janela_app:
+                        janela_app.destroy()
+                    sys.exit(0)
+        except Exception as e:
+            print("Verificação de update ignorada:", e)
+
+    threading.Thread(target=_checar, daemon=True).start()
 
 def obter_pasta_desktop():
     usuario = os.environ.get("USERPROFILE", os.path.expanduser("~"))
@@ -257,8 +98,9 @@ def obter_pasta_desktop():
     return desktop_padrao
 
 # ==========================================
-# BANCO DE DADOS
+# BANCO DE DADOS E AÇÕES
 # ==========================================
+
 def inicializar_banco():
     conn = sqlite3.connect('controle_ponto.db')
     cursor = conn.cursor()
@@ -279,22 +121,6 @@ def inicializar_banco():
     ''')
     conn.commit()
     conn.close()
-
-def registrar_leitura(codigo_lido):
-    conn = sqlite3.connect('controle_ponto.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, nome FROM funcionarios WHERE codigo_barra = ?', (codigo_lido,))
-    ministro = cursor.fetchone()
-    
-    if ministro:
-        agora = datetime.now().strftime('%d/%m/%Y às %H:%M:%S')
-        cursor.execute('INSERT INTO registros (funcionario_id, data_hora) VALUES (?, ?)', (ministro[0], agora))
-        conn.commit()
-        conn.close()
-        return True, f"✓  {ministro[1]} — Ponto registrado ({agora})"
-    else:
-        conn.close()
-        return False, f"✕  Código {codigo_lido} não encontrado no sistema"
 
 def cadastrar_ministro(nome, codigo_barra):
     conn = sqlite3.connect('controle_ponto.db')
@@ -361,16 +187,46 @@ def obter_ultimos_registros(limite=50):
     conn.close()
     return dados
 
+def registrar_leitura(codigo_lido):
+    conn = sqlite3.connect('controle_ponto.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, nome FROM funcionarios WHERE codigo_barra = ?', (codigo_lido,))
+    ministro = cursor.fetchone()
+    
+    if ministro:
+        func_id, nome = ministro
+        hoje = datetime.now().strftime('%d/%m/%Y')
+        
+        cursor.execute('''
+            SELECT COUNT(*) FROM registros 
+            WHERE funcionario_id = ? AND data_hora LIKE ?
+        ''', (func_id, f"{hoje}%"))
+        
+        ja_registrado = cursor.fetchone()[0] > 0
+        
+        if ja_registrado:
+            conn.close()
+            return False, f"⚠️  {nome} (Crachá {codigo_lido}) já registrou o ponto hoje!"
+            
+        agora = datetime.now().strftime('%d/%m/%Y às %H:%M:%S')
+        cursor.execute('INSERT INTO registros (funcionario_id, data_hora) VALUES (?, ?)', (func_id, agora))
+        conn.commit()
+        conn.close()
+        return True, f"✓  {nome} — Ponto registrado ({agora})"
+    else:
+        conn.close()
+        return False, f"✕  Código {codigo_lido} não encontrado no sistema"
+
 # ==========================================
-# EXPORTAÇÃO PERSONALIZADA (edição#n_dd-mm-aaaa)
+# EXPORTAÇÃO EXCEL
 # ==========================================
+
 def exportar_excel_personalizado(texto_edicao=""):
     desktop = obter_pasta_desktop()
     pasta_destino = os.path.join(desktop, "relatorios")
     if not os.path.exists(pasta_destino):
         os.makedirs(pasta_destino)
 
-    # Limpeza para evitar caracteres proibidos no Windows
     tag_edicao = texto_edicao.strip() if texto_edicao.strip() else "edição#"
     tag_edicao_limpa = "".join(c for c in tag_edicao if c.isalnum() or c in ('#', '_', '-'))
     
@@ -405,7 +261,6 @@ def exportar_excel_personalizado(texto_edicao=""):
     ws.row_dimensions[2].height = 6
     ws.row_dimensions[3].height = 28
 
-    # Título do Banner
     ws.merge_cells('C1:F1')
     titulo_cell = ws['C1']
     titulo_cell.value = f"Controle de ponto do centro de cura ({tag_edicao})"
@@ -514,23 +369,17 @@ def gerar_imagem_barcode(codigo_6_digitos, nome):
 # ==========================================
 
 def aplicar_tema_barra_titulo(janela, cor_hex="#F5F7F4"):
-    """
-    Define a cor de fundo e do texto da barra de título nativa no Windows 10/11.
-    """
     try:
         janela.update_idletasks()
-        # Obtém o HWND da janela nativa do Windows
         hwnd = ctypes.windll.user32.GetParent(janela.winfo_id())
         if not hwnd:
             hwnd = janela.winfo_id()
 
-        # Converte RGB hex (#RRGGBB) para formato BGR aceito pelo Windows DWM
         r = int(cor_hex[1:3], 16)
         g = int(cor_hex[3:5], 16)
         b = int(cor_hex[5:7], 16)
         cor_bgr = (b << 16) | (g << 8) | r
 
-        # 35 = DWMWA_CAPTION_COLOR (cor de fundo da barra)
         DWMWA_CAPTION_COLOR = 35
         ctypes.windll.dwmapi.DwmSetWindowAttribute(
             hwnd,
@@ -539,7 +388,6 @@ def aplicar_tema_barra_titulo(janela, cor_hex="#F5F7F4"):
             ctypes.sizeof(ctypes.c_int)
         )
 
-        # 36 = DWMWA_TEXT_COLOR (cor do texto do título: #17221D)
         DWMWA_TEXT_COLOR = 36
         cor_texto_bgr = (0x1D << 16) | (0x22 << 8) | 0x17
         ctypes.windll.dwmapi.DwmSetWindowAttribute(
@@ -553,9 +401,6 @@ def aplicar_tema_barra_titulo(janela, cor_hex="#F5F7F4"):
 
 if __name__ == "__main__":
 
-    # Verifica atualização no GitHub sem travar a interface
-    verificar_atualizacao(app)
-    
     inicializar_banco()
     
     ctk.set_appearance_mode("light")
@@ -563,7 +408,6 @@ if __name__ == "__main__":
     app = ctk.CTk()
     app.title("Centro de Cura — Sistema de Controle de Ponto")
     
-    # 1. Troca o ícone padrão pelo ícone da sua aplicação
     caminho_ico = obter_caminho_recurso("logo.ico")
     if not os.path.exists(caminho_ico):
         caminho_ico = obter_caminho_recurso("logocura.ico")
@@ -575,14 +419,11 @@ if __name__ == "__main__":
         except Exception:
             pass
 
-    # 2. Pinta a barra nativa do Windows
     aplicar_tema_barra_titulo(app, cor_hex="#F5F7F4")
 
-    # 3. Força a abertura em tela cheia maximizada após renderizar
     app.after(100, lambda: app.state("zoomed"))
 
-    # 2. Pinta a barra nativa do Windows
-    aplicar_tema_barra_titulo(app, cor_hex="#F5F7F4")
+    verificar_atualizacao(app)
     
     COR_VERDE_PRI = "#0B4D3B"
     COR_VERDE_SEC = "#237A57"
@@ -628,7 +469,7 @@ if __name__ == "__main__":
     ctk.CTkLabel(title_box, text="Sistema de Controle de Ponto", font=("Segoe UI", 12), text_color=COR_CINZA, anchor="w").pack(fill="x")
 
     def acao_exportar():
-        edicao_texto = entry_edicao.get().strip()
+        edicao_texto = entry_edicao.get().strip() if 'entry_edicao' in locals() else ""
         caminho_salvo = exportar_excel_personalizado(edicao_texto)
         messagebox.showinfo("Exportação Concluída", f"Planilha salva com sucesso em:\n\n{caminho_salvo}")
 
@@ -754,12 +595,11 @@ if __name__ == "__main__":
     btn_cadastrar = ctk.CTkButton(form_box, text="Gerar crachá", command=salvar_cadastro, width=360, height=42, corner_radius=10, fg_color=COR_VERDE_PRI, hover_color=COR_VERDE_SEC, text_color=COR_BRANCO, font=("Segoe UI", 14, "bold"))
     btn_cadastrar.pack(pady=(5, 0))
 
-# --- TELA 3: PONTO ---
+    # --- TELA 3: PONTO ---
     view_ponto = ctk.CTkFrame(card_central, fg_color="transparent")
     ctk.CTkLabel(view_ponto, text="REGISTRAR PONTO", font=("Segoe UI", 20, "bold"), text_color=COR_TEXTO).pack(pady=(35, 4))
     ctk.CTkLabel(view_ponto, text="Passe o seu crachá no leitor", font=("Segoe UI", 13), text_color=COR_CINZA).pack(pady=(0, 20))
 
-    # Campo 1: Leitura de Crachá
     ctk.CTkLabel(view_ponto, text="Código do Crachá", font=("Segoe UI", 12, "bold"), text_color=COR_TEXTO, anchor="w").pack(fill="x", padx=100, pady=(0, 4))
     entry_leitura = ctk.CTkEntry(
         view_ponto, width=340, height=42, corner_radius=10, 
@@ -769,7 +609,6 @@ if __name__ == "__main__":
     )
     entry_leitura.pack(pady=(0, 16))
 
-    # Campo 2: Identificação da Edição (Idêntico ao campo de cima em formato e alinhamento)
     ctk.CTkLabel(view_ponto, text="Identificação da Edição", font=("Segoe UI", 12, "bold"), text_color=COR_TEXTO, anchor="w").pack(fill="x", padx=100, pady=(0, 4))
     entry_edicao = ctk.CTkEntry(
         view_ponto, width=340, height=42, corner_radius=10, 
@@ -811,9 +650,7 @@ if __name__ == "__main__":
     entry_leitura.bind('<Return>', on_enter_leitura)
     ctk.CTkLabel(view_ponto, text="●  Leitor pronto para leitura", font=("Segoe UI", 12), text_color=COR_VERDE_SEC).pack(side="bottom", pady=20)
 
-
-    
-# --- TELA 4: RELATÓRIOS ---
+    # --- TELA 4: RELATÓRIOS ---
     view_relatorios = ctk.CTkFrame(card_central, fg_color="transparent")
     ctk.CTkLabel(view_relatorios, text="HISTÓRICO DE HOJE", font=("Segoe UI", 20, "bold"), text_color=COR_TEXTO).pack(pady=(28, 4))
     ctk.CTkLabel(view_relatorios, text="Registros de presença da data atual", font=("Segoe UI", 13), text_color=COR_CINZA).pack(pady=(0, 14))
@@ -834,7 +671,6 @@ if __name__ == "__main__":
             ctk.CTkLabel(item, text=f"{nome} ({cod})", font=("Segoe UI", 12, "bold"), text_color=COR_TEXTO).pack(side="left", padx=10, pady=6)
             ctk.CTkLabel(item, text=data_hora, font=("Segoe UI", 11), text_color=COR_CINZA).pack(side="right", padx=10, pady=6)
 
-    # Apenas uma instância do botão de exportar
     ctk.CTkButton(
         view_relatorios, 
         text="📊 Baixar Planilha na Área de Trabalho", 
@@ -949,7 +785,6 @@ if __name__ == "__main__":
     )
     btn_remover.pack(side="right")
 
-    # Controle de Navegação
     telas = {
         "inicio": view_inicio,
         "ministros": view_ministros,
