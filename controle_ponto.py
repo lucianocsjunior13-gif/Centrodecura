@@ -30,7 +30,7 @@ def obter_caminho_recurso(nome_arquivo):
         return nome_arquivo
     return nome_arquivo
 
-VERSAO_ATUAL = "1.0.1"
+VERSAO_ATUAL = "1.0.3"
 REPO_GITHUB = "lucanocsjunior13-gif/Centrodecura"
 
 try:
@@ -51,6 +51,7 @@ def verificar_atualizacao(janela_app=None):
                 
             tag_remota = dados.get("tag_name", "").replace("v", "").strip()
             
+            # Se a versão remota for superior/diferente da atual
             if tag_remota and tag_remota != VERSAO_ATUAL:
                 download_url = None
                 for asset in dados.get("assets", []):
@@ -59,31 +60,36 @@ def verificar_atualizacao(janela_app=None):
                         break
                 
                 if download_url:
-                    print(f"Atualização encontrada: {tag_remota}. Baixando...")
-                    
-                    caminho_atual = sys.executable
+                    caminho_atual = os.path.abspath(sys.executable)
                     caminho_novo = caminho_atual + ".novo"
+                    caminho_bat = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "atualizar.bat")
                     
+                    # Baixa o novo executável
                     urllib.request.urlretrieve(download_url, caminho_novo)
                     
+                    # Script BAT com retry para aguardar o fecho total do .exe antigo
                     cmd_bat = f"""@echo off
-timeout /t 2 /nobreak > nul
+:loop
+timeout /t 1 /nobreak > nul
+del "{caminho_atual}" 2>nul
+if exist "{caminho_atual}" goto loop
 move /y "{caminho_novo}" "{caminho_atual}"
 start "" "{caminho_atual}"
 del "%~f0"
 """
-                    caminho_bat = os.path.join(os.environ.get("TEMP", "C:\\Temp"), "atualizar.bat")
                     with open(caminho_bat, "w") as f:
                         f.write(cmd_bat)
                     
-                    subprocess.Popen(caminho_bat, shell=True)
+                    subprocess.Popen(caminho_bat, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+                    
                     if janela_app:
                         janela_app.destroy()
-                    sys.exit(0)
+                    os._exit(0)
         except Exception as e:
-            print("Verificação de update ignorada:", e)
+            print("Erro no auto-update:", e)
 
     threading.Thread(target=_checar, daemon=True).start()
+
 
 def obter_pasta_desktop():
     usuario = os.environ.get("USERPROFILE", os.path.expanduser("~"))
@@ -355,14 +361,23 @@ def gerar_imagem_barcode(codigo_6_digitos, nome):
     if not os.path.exists(folder):
         os.makedirs(folder)
     
+    # 1. Tenta carregar Arial, se falhar usa a fonte padrão nativa do PIL
+    try:
+        fonte_usar = ImageFont.truetype("arial.ttf", 14)
+    except Exception:
+        fonte_usar = ImageFont.load_default()
+
+    # 2. Configura o gerador do código de barras utilizando a fonte definida
+    writer = ImageWriter()
+    writer.font = fonte_usar
+
     barcode_class = barcode.get_barcode_class('code128')
-    bar = barcode_class(codigo_6_digitos, writer=ImageWriter())
+    bar = barcode_class(codigo_6_digitos, writer=writer)
     
     safe_nome = "".join(c for c in nome if c.isalnum() or c in (' ', '_', '-')).rstrip()
     full_path = os.path.join(folder, f"{safe_nome}_{codigo_6_digitos}")
     saved_path = bar.save(full_path)
     return saved_path, codigo_6_digitos
-
 
 # ==========================================
 # INTERFACE GRÁFICA

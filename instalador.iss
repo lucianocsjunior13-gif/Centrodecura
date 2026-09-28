@@ -1,5 +1,5 @@
 #define MyAppName "Centro de Cura"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Centro de Cura"
 #define MyAppExeName "CentroDeCura.exe"
 
